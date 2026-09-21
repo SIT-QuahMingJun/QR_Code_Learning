@@ -70,7 +70,8 @@ jobs:
           mkdir -p web
           cp build-wasm/index.js web/
           cp build-wasm/index.wasm web/
-          cp shell.html web/index.html
+          # web/index.html is the project-owned renderer (tracked in git);
+          # it already lives in web/, no copy needed.
 
       # Zips the web/ folder into a Pages artifact and uploads it to the Actions run.
       - name: Upload Pages artifact
