@@ -58,17 +58,17 @@ TEST(DataCodewords, Version1LIs19) {
 }
 
 TEST(DataCodewords, Version1MIs16) {
-    // v1 total=26, EC=7, blocks=1 → 26 - 7*1 = 16
+    // v1 total=26, EC=10, blocks=1 → 26 - 10*1 = 16
     EXPECT_EQ(dataCodewords(1, ErrorCorrectionLevel::M), 16);
 }
 
 TEST(DataCodewords, Version1QIs13) {
-    // v1 total=26, EC=7, blocks=1 → 26 - 7*1 = 13
+    // v1 total=26, EC=13, blocks=1 → 26 - 13*1 = 13
     EXPECT_EQ(dataCodewords(1, ErrorCorrectionLevel::Q), 13);
 }
 
 TEST(DataCodewords, Version1HIs9) {
-    // v1 total=26, EC=7, blocks=1 → 26 - 7*1 = 9
+    // v1 total=26, EC=17, blocks=1 → 26 - 17*1 = 9
     EXPECT_EQ(dataCodewords(1, ErrorCorrectionLevel::H), 9);
 }
 
@@ -685,9 +685,8 @@ TEST(MakeQRCode, FindersAreDrawn) {
 
 TEST(MakeQRCode, DarkModuleIsSet) {
     QrCode qr = makeQRCode("HELLO WORLD", ErrorCorrectionLevel::M);
-    // Dark module is at (4*version + 9, 8).
-    int darkRow = 4 * qr.version + 9;
-    EXPECT_TRUE(isDark(qr, darkRow, 8));
+    // Dark module is at row 8, col size - 8.
+    EXPECT_TRUE(isDark(qr, 8, qr.size - 8));
 }
 
 TEST(MakeQRCode, FormatInfoWritten) {

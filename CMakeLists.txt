@@ -6,11 +6,12 @@ project(QR_Code_Learning LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ---------------------------------------------------------------------------
-# Import dependencies (GoogleTest, GLM, etc.)
-# ---------------------------------------------------------------------------
-include(cmakes/ImportDependencies.cmake)
-importDependencies()
+option(QR_FETCH_GTEST "Download GoogleTest and build the full unit-test suite" OFF)
+
+if(NOT EMSCRIPTEN AND QR_FETCH_GTEST)
+    include(cmakes/ImportDependencies.cmake)
+    importDependencies()
+endif()
 
 # ---------------------------------------------------------------------------
 # QR encoder library (pure C++ logic — shared by tests and WASM build)
@@ -25,12 +26,25 @@ target_include_directories(qr_encoder PUBLIC src)
 # ---------------------------------------------------------------------------
 if(NOT EMSCRIPTEN)
     enable_testing()
+
+    # Always available: a compact, dependency-free test path for local runs
+    # and CI environments without internet access.
+    add_executable(qr_smoke_tests
+        tests/qr_smoke_test.cpp
+    )
+    target_link_libraries(qr_smoke_tests PRIVATE qr_encoder)
+    add_test(NAME qr_smoke_tests COMMAND qr_smoke_tests)
+
+    # Optional: the more granular GoogleTest suite. Enable explicitly with
+    # -DQR_FETCH_GTEST=ON when the dependency can be downloaded or supplied.
+    if(QR_FETCH_GTEST)
     add_executable(qr_tests
         tests/qr_encoder_test.cpp
     )
     target_link_libraries(qr_tests PRIVATE qr_encoder GTest::gtest_main)
     include(GoogleTest)
     gtest_discover_tests(qr_tests)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
