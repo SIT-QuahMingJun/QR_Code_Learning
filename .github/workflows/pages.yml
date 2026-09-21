@@ -1,0 +1,83 @@
+name: GitHub Pages
+
+# Triggers on pull requests or when push to main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Set system permissions required for GitHub Pages framework
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Prevent concurrent deployments from stepping on each other (Rare)
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # Executes on every PR or merge
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Downloads the repo (src/, tests/, CMakeLists.txt, cmakes/) onto the runner so the rest of the steps can build it.
+      - uses: actions/checkout@v4
+      
+      # Runs cmake configuration to generate build file, fetch googletest via fetchcontent
+      - name: Configure (native)
+        # -S . = source dir, -B build = output dir, Release = optimized.
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # Compiles qr_encoder.lib + qr_tests.exe from the configured build.
+      - name: Build
+        run: cmake --build build --config Release
+
+      # Runs the compiled qr_tests.exe and reports pass/fail per test.
+      - name: Run GoogleTest
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  # JOB 2: deploy — WASM build + GitHub Pages publish
+  # Produces the static site (index.html + index.js + index.wasm) and publishes it to GitHub Pages.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test          # ← gate: only if tests pass
+    if: github.ref == 'refs/heads/main'
+    steps:
+      # Downloads the repo onto the runner.
+      - uses: actions/checkout@v4
+
+      # Installs the Emscripten SDK (emcc/emcmake) on the runner and puts
+      # it on PATH. This is what lets us compile C++ → WASM. The action
+      # caches the SDK so subsequent runs are faster.
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      # Runs CMake configure with the Emscripten toolchain
+      - name: Configure (WASM)
+        run: emcmake cmake -S . -B build-wasm
+
+      # Compiles wasm_glue.cpp + qr_encoder.cpp → index.js + index.wasm
+      - name: Build (WASM)
+        run: cmake --build build-wasm --target qr_wasm
+
+      # Assembles the deployable static site into web
+      - name: Stage web output
+        run: |
+          mkdir -p web
+          cp build-wasm/index.js web/
+          cp build-wasm/index.wasm web/
+          cp shell.html web/index.html
+
+      # Zips the web/ folder into a Pages artifact and uploads it to the Actions run.
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/
+
+      # Publishes the artifact to GitHub Pages using the id-token permission (OIDC — no PAT needed).
+      - name: Deploy to Pages
+        uses: actions/deploy-pages@v4
