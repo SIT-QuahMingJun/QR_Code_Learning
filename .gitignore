@@ -19,6 +19,7 @@ dist/
 *.js
 *.html
 !src/**/*.html
+!web/**/*.html
 
 # --- Emscripten generated glue ---
 *.data
