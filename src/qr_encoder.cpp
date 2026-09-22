@@ -20,6 +20,7 @@ Pipeline:
 #include "qr_encoder.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstdlib>
 #include <stdexcept>
@@ -681,11 +682,12 @@ void drawAlignment(QrCode& qr) {
     }
 }
 
-// Sets the always-dark module. In row/column coordinates this is
-// (8, size - 8), which is (8, 4 * version + 9).
+// Sets the always-dark module. The QR specification describes coordinates as
+// (x=8, y=4*version+9); in this project's (row, col) convention that is
+// (size - 8, 8).
 void drawDarkModule(QrCode& qr) {
-    const int row = 8;
-    const int col = qr.size - 8;
+    const int row = qr.size - 8;
+    const int col = 8;
     setModule(qr, row, col, true);
     reserveModule(qr, row, col);  // dark module is a function pattern
 }
@@ -693,19 +695,23 @@ void drawDarkModule(QrCode& qr) {
 void reserveFormatInfoAreas(QrCode& qr) {
     const int size = qr.size;
 
+    // First copy around the top-left finder.
     for (int i = 0; i < 6; ++i) {
-        reserveModule(qr, 8, i);
         reserveModule(qr, i, 8);
     }
-    reserveModule(qr, 8, 7);
-    reserveModule(qr, 8, 8);
     reserveModule(qr, 7, 8);
+    reserveModule(qr, 8, 8);
+    reserveModule(qr, 8, 7);
+    for (int i = 9; i < 15; ++i) {
+        reserveModule(qr, 8, 14 - i);
+    }
 
+    // Second copy near the top-right and bottom-left finders.
     for (int i = 0; i < 8; ++i) {
-        reserveModule(qr, size - 1 - i, 8);
+        reserveModule(qr, 8, size - 1 - i);
     }
     for (int i = 8; i < 15; ++i) {
-        reserveModule(qr, 8, size - 15 + i);
+        reserveModule(qr, size - 15 + i, 8);
     }
 }
 
@@ -872,50 +878,56 @@ int penaltyRule2(const QrCode& qr) {
 //   00001011101  OR  10111010000
 // It does NOT require 4 lights on both sides simultaneously.
 int penaltyRule3(const QrCode& qr) {
+    const int size = qr.size;
+
+    auto countPatterns = [&](const std::array<int, 7>& history) {
+        const int n = history[1];
+        const bool core = n > 0 && history[2] == n && history[3] == n * 3 &&
+                          history[4] == n && history[5] == n;
+        return (core && history[0] >= n * 4 && history[6] >= n ? 1 : 0) +
+               (core && history[6] >= n * 4 && history[0] >= n ? 1 : 0);
+    };
+
+    auto scoreLine = [&](auto darkAt) {
+        int patterns = 0;
+        bool runColor = false;
+        int runLength = 0;
+        std::array<int, 7> history{};
+
+        auto addHistory = [&](int length) {
+            // Treat the symbol's outside border as a long light run.
+            if (history[0] == 0) length += size;
+            std::copy_backward(history.begin(), history.end() - 1, history.end());
+            history[0] = length;
+        };
+
+        for (int position = 0; position < size; ++position) {
+            const bool color = darkAt(position);
+            if (color == runColor) {
+                runLength++;
+            } else {
+                addHistory(runLength);
+                if (!runColor) patterns += countPatterns(history);
+                runColor = color;
+                runLength = 1;
+            }
+        }
+
+        if (runColor) {
+            addHistory(runLength);
+            runLength = 0;
+        }
+        runLength += size;
+        addHistory(runLength);
+        patterns += countPatterns(history);
+        return patterns * 40;
+    };
+
     int penalty = 0;
-    int size = qr.size;
-
-    // Check rows.
-    for (int row = 0; row < size; ++row) {
-        for (int col = 0; col < size - 10; ++col) {
-            // Core pattern 1011101 at positions col..col+6.
-            bool core = isDark(qr, row, col) && !isDark(qr, row, col + 1) &&
-                        isDark(qr, row, col + 2) && isDark(qr, row, col + 3) &&
-                        isDark(qr, row, col + 4) && !isDark(qr, row, col + 5) &&
-                        isDark(qr, row, col + 6);
-            if (!core) continue;
-
-            // 4 light modules BEFORE (col-4..col-1) OR AFTER (col+7..col+10).
-            bool fourBefore = (col >= 4) &&
-                !isDark(qr, row, col - 4) && !isDark(qr, row, col - 3) &&
-                !isDark(qr, row, col - 2) && !isDark(qr, row, col - 1);
-            bool fourAfter = (col + 10 < size) &&
-                !isDark(qr, row, col + 7) && !isDark(qr, row, col + 8) &&
-                !isDark(qr, row, col + 9) && !isDark(qr, row, col + 10);
-
-            if (fourBefore || fourAfter) penalty += 40;
-        }
-    }
-
-    // Check columns.
-    for (int col = 0; col < size; ++col) {
-        for (int row = 0; row < size - 10; ++row) {
-            bool core = isDark(qr, row, col) && !isDark(qr, row + 1, col) &&
-                        isDark(qr, row + 2, col) && isDark(qr, row + 3, col) &&
-                        isDark(qr, row + 4, col) && !isDark(qr, row + 5, col) &&
-                        isDark(qr, row + 6, col);
-            if (!core) continue;
-
-            bool fourBefore = (row >= 4) &&
-                !isDark(qr, row - 4, col) && !isDark(qr, row - 3, col) &&
-                !isDark(qr, row - 2, col) && !isDark(qr, row - 1, col);
-            bool fourAfter = (row + 10 < size) &&
-                !isDark(qr, row + 7, col) && !isDark(qr, row + 8, col) &&
-                !isDark(qr, row + 9, col) && !isDark(qr, row + 10, col);
-
-            if (fourBefore || fourAfter) penalty += 40;
-        }
-    }
+    for (int row = 0; row < size; ++row)
+        penalty += scoreLine([&](int col) { return isDark(qr, row, col); });
+    for (int col = 0; col < size; ++col)
+        penalty += scoreLine([&](int row) { return isDark(qr, row, col); });
     return penalty;
 }
 
@@ -948,14 +960,16 @@ int penaltyScore(const QrCode& qr) {
 
 // Tries all 8 masks, scores each, and applies the best one.
 // Returns the chosen mask ID (0-7).
-int chooseAndApplyMask(QrCode& qr) {
+int chooseAndApplyMask(QrCode& qr, ErrorCorrectionLevel ec) {
     int bestMask = 0;
     int bestScore = INT_MAX;
 
     for (int maskId = 0; maskId < 8; ++maskId) {
-        // Copy the grid, apply the mask, score it.
+        // The format bits depend on the candidate mask and are part of the
+        // finished symbol, so they must be present when computing penalties.
         QrCode copy = qr;
         applyMask(copy, maskId);
+        writeFormatInfo(copy, ec, maskId);
         int score = penaltyScore(copy);
         if (score < bestScore) {
             bestScore = score;
@@ -1009,35 +1023,33 @@ void writeFormatInfo(QrCode& qr, ErrorCorrectionLevel ec, int maskId) {
     int format = formatInfo(ec, maskId);
     int size = qr.size;
 
-    // Copy 1: around the top-left finder.
-    // Bits 0-5 go in row 8 (cols 0-5), bit 6 at (8,7), bit 7 at
-    // (8,8), bit 8 at (7,8), and bits 9-14 in column 8 (rows 5-0).
-    // (Standard placement.)
+    // Copy 1: around the top-left finder. Reference implementations usually
+    // express these as (x,y); the calls below use (row,col).
     for (int i = 0; i < 6; ++i) {
-        setModule(qr, 8, i, (format >> i) & 1);          // row 8, cols 0-5
-        reserveModule(qr, 8, i);
+        setModule(qr, i, 8, (format >> i) & 1);          // rows 0-5, col 8
+        reserveModule(qr, i, 8);
     }
-    setModule(qr, 8, 7, (format >> 6) & 1);              // bit 6
-    reserveModule(qr, 8, 7);
+    setModule(qr, 7, 8, (format >> 6) & 1);              // bit 6
+    reserveModule(qr, 7, 8);
     setModule(qr, 8, 8, (format >> 7) & 1);              // bit 7
     reserveModule(qr, 8, 8);
-    setModule(qr, 7, 8, (format >> 8) & 1);              // bit 8
-    reserveModule(qr, 7, 8);
-    for (int i = 0; i < 6; ++i) {
-        setModule(qr, i, 8, (format >> (14 - i)) & 1);   // col 8, rows 0-5
-        reserveModule(qr, i, 8);
+    setModule(qr, 8, 7, (format >> 8) & 1);              // bit 8
+    reserveModule(qr, 8, 7);
+    for (int i = 9; i < 15; ++i) {
+        setModule(qr, 8, 14 - i, (format >> i) & 1);     // row 8, cols 5-0
+        reserveModule(qr, 8, 14 - i);
     }
 
     // Copy 2: split near top-right and bottom-left finders.
-    // Bits 0-7 go in column 8 (rows size-1 down to size-8).
-    // Bits 8-14 go in row 8 (cols size-7 to size-1).
+    // Bits 0-7 go in row 8 (cols size-1 down to size-8).
+    // Bits 8-14 go in column 8 (rows size-7 to size-1).
     for (int i = 0; i < 8; ++i) {
-        setModule(qr, size - 1 - i, 8, (format >> i) & 1);
-        reserveModule(qr, size - 1 - i, 8);
+        setModule(qr, 8, size - 1 - i, (format >> i) & 1);
+        reserveModule(qr, 8, size - 1 - i);
     }
     for (int i = 8; i < 15; ++i) {
-        setModule(qr, 8, size - 15 + i, (format >> i) & 1);
-        reserveModule(qr, 8, size - 15 + i);
+        setModule(qr, size - 15 + i, 8, (format >> i) & 1);
+        reserveModule(qr, size - 15 + i, 8);
     }
 
     // The fixed dark module sits beside the second format-information copy.
@@ -1163,7 +1175,7 @@ QrCode makeQRCode(const std::string& data, ErrorCorrectionLevel ec) {
     placeData(qr, full);
 
     // Stage 7: apply the best mask.
-    int mask = chooseAndApplyMask(qr);
+    int mask = chooseAndApplyMask(qr, ec);
 
     // Stage 8: write format information.
     writeFormatInfo(qr, ec, mask);

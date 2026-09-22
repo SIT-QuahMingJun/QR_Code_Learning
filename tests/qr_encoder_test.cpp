@@ -28,6 +28,20 @@ QrCode version1FunctionPatterns() {
     return qr;
 }
 
+std::string deterministicRandomPayload(int version, int length) {
+    std::uint32_t state = UINT32_C(0x00C0FFEE) ^
+                          (static_cast<std::uint32_t>(version) * UINT32_C(0x9E3779B9));
+    std::string result;
+    result.reserve(static_cast<std::size_t>(length));
+    for (int i = 0; i < length; ++i) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        result.push_back(static_cast<char>('a' + state % 26));
+    }
+    return result;
+}
+
 }  // namespace
 
 // --- moduleSize ------------------------------------------------------------
@@ -387,12 +401,19 @@ TEST(DrawTiming, AlternatesAlongRow6) {
     EXPECT_FALSE(isDark(qr, 6, 11));
 }
 
-TEST(DrawDarkModule, Version1AtRow8Col13) {
+TEST(DrawDarkModule, UsesStandardRowColumnCoordinates) {
     QrCode qr = createMatrix(1);
     drawDarkModule(qr);
-    // Version 1: row 8, col = size - 8 = 13.
-    EXPECT_TRUE(isDark(qr, 8, 13));
-    EXPECT_TRUE(isReserved(qr, 8, 13));
+    // The standard coordinate is (x=8, y=size-8). This API uses (row,col).
+    EXPECT_TRUE(isDark(qr, 13, 8));
+    EXPECT_TRUE(isReserved(qr, 13, 8));
+
+    for (int version : {2, 7}) {
+        QrCode larger = createMatrix(version);
+        drawDarkModule(larger);
+        EXPECT_TRUE(isDark(larger, larger.size - 8, 8));
+        EXPECT_TRUE(isReserved(larger, larger.size - 8, 8));
+    }
 }
 
 TEST(DrawAlignment, Version2HasOneAt1818) {
@@ -563,7 +584,9 @@ TEST(ChooseAndApplyMask, ReturnsValidMask) {
     QrCode qr = createMatrix(1);
     // Place some data so there's something to mask.
     placeData(qr, { 0xAA, 0x55 });
-    int mask = chooseAndApplyMask(qr);
+    reserveFormatInfoAreas(qr);
+    drawDarkModule(qr);
+    int mask = chooseAndApplyMask(qr, ErrorCorrectionLevel::M);
     EXPECT_GE(mask, 0);
     EXPECT_LE(mask, 7);
 }
@@ -603,14 +626,22 @@ TEST(WriteFormatInfo, UsesStandardBitLocations) {
     const int format = formatInfo(ErrorCorrectionLevel::M, 0);
     writeFormatInfo(qr, ErrorCorrectionLevel::M, 0);
 
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_EQ(isDark(qr, i, 8), ((format >> i) & 1) != 0);
+    }
+    EXPECT_EQ(isDark(qr, 7, 8), ((format >> 6) & 1) != 0);
     EXPECT_EQ(isDark(qr, 8, 8), ((format >> 7) & 1) != 0);
-    EXPECT_EQ(isDark(qr, 7, 8), ((format >> 8) & 1) != 0);
+    EXPECT_EQ(isDark(qr, 8, 7), ((format >> 8) & 1) != 0);
+    for (int i = 9; i < 15; ++i) {
+        EXPECT_EQ(isDark(qr, 8, 14 - i), ((format >> i) & 1) != 0);
+    }
     for (int i = 0; i < 8; ++i) {
-        EXPECT_EQ(isDark(qr, qr.size - 1 - i, 8), ((format >> i) & 1) != 0);
+        EXPECT_EQ(isDark(qr, 8, qr.size - 1 - i), ((format >> i) & 1) != 0);
     }
     for (int i = 8; i < 15; ++i) {
-        EXPECT_EQ(isDark(qr, 8, qr.size - 15 + i), ((format >> i) & 1) != 0);
+        EXPECT_EQ(isDark(qr, qr.size - 15 + i, 8), ((format >> i) & 1) != 0);
     }
+    EXPECT_TRUE(isDark(qr, qr.size - 8, 8));
 }
 
 // --- Stage 9: version information ------------------------------------------
@@ -685,8 +716,8 @@ TEST(MakeQRCode, FindersAreDrawn) {
 
 TEST(MakeQRCode, DarkModuleIsSet) {
     QrCode qr = makeQRCode("HELLO WORLD", ErrorCorrectionLevel::M);
-    // Dark module is at row 8, col size - 8.
-    EXPECT_TRUE(isDark(qr, 8, qr.size - 8));
+    // Dark module is at row size - 8, col 8.
+    EXPECT_TRUE(isDark(qr, qr.size - 8, 8));
 }
 
 TEST(MakeQRCode, FormatInfoWritten) {
@@ -719,4 +750,16 @@ TEST(MakeQRCode, DifferentDataGivesDifferentGrid) {
     QrCode a = makeQRCode("HELLO WORLD", ErrorCorrectionLevel::M);
     QrCode b = makeQRCode("HELLO WORLD!", ErrorCorrectionLevel::M);
     EXPECT_NE(a.modules, b.modules);
+}
+
+TEST(MakeQRCode, DeterministicRandomBytePayloadCoversVersions1Through10) {
+    const int lengths[] = {8, 15, 27, 43, 63, 85, 107, 123, 153, 181};
+    for (int version = 1; version <= 10; ++version) {
+        const std::string payload = deterministicRandomPayload(version, lengths[version - 1]);
+        const QrCode qr = makeQRCode(payload, ErrorCorrectionLevel::M);
+        EXPECT_EQ(detectMode(payload), Mode::BYTE) << "version " << version;
+        EXPECT_EQ(qr.version, version) << "payload length " << payload.size();
+        EXPECT_EQ(qr.size, moduleSize(version));
+        EXPECT_TRUE(isDark(qr, qr.size - 8, 8));
+    }
 }

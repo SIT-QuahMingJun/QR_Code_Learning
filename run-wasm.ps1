@@ -63,6 +63,16 @@ Write-Host 'Configuring WASM demo...'
 if ($LASTEXITCODE -ne 0) { throw 'WASM configuration failed.' }
 
 Write-Host 'Building WASM demo...'
+# Emscripten's Windows post-link step cannot always replace an existing
+# modularized JavaScript loader. These are generated artifacts, so remove
+# them before linking to guarantee that the browser receives the new WASM.
+foreach ($generatedName in @('index.js', 'index.wasm')) {
+    $generatedPath = Join-Path $wasmBuild $generatedName
+    if (Test-Path -LiteralPath $generatedPath -PathType Leaf) {
+        Remove-Item -LiteralPath $generatedPath -Force
+    }
+}
+
 $buildSucceeded = $false
 for ($attempt = 1; $attempt -le 3; $attempt++) {
     & cmake --build $wasmBuild --config Debug

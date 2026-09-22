@@ -250,7 +250,7 @@ void drawTiming(QrCode& qr);
 // Draws the alignment patterns (5x5 squares) at their version-dependent positions.
 void drawAlignment(QrCode& qr);
 
-// Sets the always-dark module at (row 8, col size - 8).
+// Sets the always-dark module at (row size - 8, col 8).
 void drawDarkModule(QrCode& qr);
 
 // Reserves the locations for the two copies of the 15-bit format information.
@@ -301,9 +301,10 @@ int penaltyRule3(const QrCode& qr);
 // Rule 4: distance of dark-module % from 50%, in 5% steps, +10 each.
 int penaltyRule4(const QrCode& qr);
 
-// Tries all 8 masks, scores each, and applies the best one.
+// Tries all 8 masks, writes each candidate's format bits before scoring,
+// and applies the best one. The final format bits are written separately.
 // Returns the chosen mask ID (0-7).
-int chooseAndApplyMask(QrCode& qr);
+int chooseAndApplyMask(QrCode& qr, ErrorCorrectionLevel ec);
 
 // ---------------------------------------------------------------------------
 // Stage 8: Format information
